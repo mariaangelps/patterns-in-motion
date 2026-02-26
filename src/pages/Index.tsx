@@ -1,18 +1,26 @@
 import { useState, useCallback } from "react";
-import PatternCanvas from "@/components/PatternCanvas";
+import PatternCanvas, { type DetectedPattern } from "@/components/PatternCanvas";
 import HUD from "@/components/HUD";
 
 const Index = () => {
-  const [patterns, setPatterns] = useState<string[]>([]);
+  const [allPatterns, setAllPatterns] = useState<DetectedPattern[]>([]);
+  const [activePatterns, setActivePatterns] = useState<DetectedPattern[]>([]);
 
-  const handlePattern = useCallback((name: string) => {
-    setPatterns((prev) => [...prev, name]);
+  const handlePattern = useCallback((pattern: DetectedPattern) => {
+    setAllPatterns((prev) => [...prev, pattern]);
+  }, []);
+
+  const handlePatternsUpdate = useCallback((patterns: DetectedPattern[]) => {
+    setActivePatterns(patterns);
   }, []);
 
   return (
     <div className="relative w-full h-screen overflow-hidden">
-      <PatternCanvas onPatternDetected={handlePattern} />
-      <HUD detectedPatterns={patterns} />
+      <PatternCanvas
+        onPatternDetected={handlePattern}
+        onPatternsUpdate={handlePatternsUpdate}
+      />
+      <HUD detectedPatterns={allPatterns} activePatterns={activePatterns} />
     </div>
   );
 };
