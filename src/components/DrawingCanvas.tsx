@@ -231,7 +231,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
           // Confidence
           ctx.font = "11px 'JetBrains Mono', monospace";
           ctx.fillStyle = `hsla(180, 10%, 75%, ${labelAlpha * 0.7})`;
-          ctx.fillText(`${result.confidence}% confianza · ${result.description}`, cx, cy + 28);
+          ctx.fillText(`${result.confidence}% confidence · ${result.description}`, cx, cy + 28);
         }
       }
 
