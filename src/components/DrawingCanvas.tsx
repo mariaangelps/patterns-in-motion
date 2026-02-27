@@ -305,7 +305,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
             <div className="flex items-center gap-2 mt-1">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
               <span className="text-primary text-glow">
-                {mode === "draw" ? "DIBUJO LIBRE" : "COLOCAR PUNTOS"}
+                {mode === "draw" ? "FREE DRAW" : "PLACE POINTS"}
               </span>
             </div>
           </div>
@@ -320,7 +320,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              ✏️ Dibujar
+              ✏️ Draw
             </button>
             <button
               onClick={() => { setMode("points"); clear(); }}
@@ -330,13 +330,13 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              📍 Puntos
+              📍 Points
             </button>
           </div>
 
           {/* Counter */}
           <div className="font-mono text-xs text-right">
-            <div className="text-muted-foreground">RECONOCIDAS</div>
+            <div className="text-muted-foreground">RECOGNIZED</div>
             <div className="text-2xl font-display font-bold text-primary text-glow mt-1">
               {history.length.toString().padStart(3, "0")}
             </div>
@@ -351,7 +351,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
             onClick={finishPoints}
             className="px-6 py-3 bg-primary/20 text-primary border border-primary/30 rounded-md font-mono text-sm hover:bg-primary/30 transition-all border-glow backdrop-blur-sm"
           >
-            ▸ RECONOCER FORMA ({placedPoints.length} puntos)
+            ▸ ▸ RECOGNIZE SHAPE ({placedPoints.length} points)
           </button>
         </div>
       )}
@@ -363,7 +363,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
             onClick={clear}
             className="px-4 py-2 bg-card/80 text-muted-foreground border border-border/50 rounded-md font-mono text-xs hover:text-foreground transition-all backdrop-blur-sm"
           >
-            LIMPIAR
+            CLEAR
           </button>
         </div>
       )}
@@ -372,8 +372,8 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
       {showResult && !result && (
         <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none">
           <div className="px-6 py-4 bg-card/80 border border-destructive/30 rounded-md font-mono text-sm text-center backdrop-blur-sm">
-            <div className="text-destructive">✗ NO RECONOCIDA</div>
-            <div className="text-muted-foreground text-xs mt-1">Intenta dibujar una forma más clara</div>
+            <div className="text-destructive">✗ ✗ NOT RECOGNIZED</div>
+            <div className="text-muted-foreground text-xs mt-1">Try drawing a clearer shape</div>
           </div>
         </div>
       )}
@@ -381,7 +381,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
       {/* History */}
       {history.length > 0 && (
         <div className="fixed bottom-6 left-6 z-20 font-mono text-xs max-w-xs pointer-events-none">
-          <div className="text-muted-foreground mb-2">HISTORIAL</div>
+          <div className="text-muted-foreground mb-2">HISTORY</div>
           <div className="space-y-0.5">
             {history.slice(0, 8).map((s, i) => (
               <div
@@ -401,8 +401,8 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
       {/* Hint */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-none font-mono text-xs text-muted-foreground/30">
         {mode === "draw"
-          ? "dibuja una figura con el mouse"
-          : "haz click para colocar vértices, luego presiona reconocer"}
+          ? "draw a shape with your mouse"
+          : "click to place vertices, then press recognize"}
       </div>
 
       {/* Scanline overlay */}
