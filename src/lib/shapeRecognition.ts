@@ -154,7 +154,7 @@ function lerp(a: number, b: number, t: number) {
 
 // ---------- Circle / Oval detection (robust) ----------
 function circleOrOval(points: Point[]): {
-  type: "CÍRCULO" | "ÓVALO" | null;
+  type: "CIRCLE" | "OVAL" | null;
   confidence: number;
   extra?: string;
 } {
@@ -209,22 +209,23 @@ function circleOrOval(points: Point[]): {
   const sAROVal = clamp01((ar - 1.10) / (2.20 - 1.10));
   const ovalScore = sOvalCirc * sAROVal;
 
-  if (circleScore < 0.18 && ovalScore < 0.18) return { type: null, confidence: 0 };
+  if (circleScore < 0.18 && ovalScore < 0.18)
+    return { type: null, confidence: 0 };
 
   if (circleScore >= ovalScore) {
     const conf = Math.round(60 + circleScore * 39);
     return {
-      type: "CÍRCULO",
+      type: "CIRCLE",
       confidence: Math.min(99, conf),
-      extra: `circularidad ${circ.toFixed(2)} · AR ${ar.toFixed(2)}`,
+      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)}`,
     };
   }
 
   const conf = Math.round(55 + ovalScore * 44);
   return {
-    type: "ÓVALO",
+    type: "OVAL",
     confidence: Math.min(99, conf),
-    extra: `circularidad ${circ.toFixed(2)} · AR ${ar.toFixed(2)}`,
+    extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)}`,
   };
 }
 
@@ -236,7 +237,12 @@ function isStarLike(points: Point[]): {
   concavityRatio: number;
 } {
   if (points.length < 20) {
-    return { match: false, confidence: 0, simplifiedCount: 0, concavityRatio: 1 };
+    return {
+      match: false,
+      confidence: 0,
+      simplifiedCount: 0,
+      concavityRatio: 1,
+    };
   }
 
   const perim = perimeter(points);
@@ -258,13 +264,23 @@ function isStarLike(points: Point[]): {
   poly = orderByAngle(poly);
   const A = polygonArea(poly);
   if (A <= 0) {
-    return { match: false, confidence: 0, simplifiedCount: poly.length, concavityRatio: 1 };
+    return {
+      match: false,
+      confidence: 0,
+      simplifiedCount: poly.length,
+      concavityRatio: 1,
+    };
   }
 
   const hull = convexHull(poly);
   const Ah = polygonArea(hull);
   if (Ah <= 0) {
-    return { match: false, confidence: 0, simplifiedCount: poly.length, concavityRatio: 1 };
+    return {
+      match: false,
+      confidence: 0,
+      simplifiedCount: poly.length,
+      concavityRatio: 1,
+    };
   }
 
   const ratio = A / Ah; // convex ~ 1, star smaller
@@ -272,7 +288,12 @@ function isStarLike(points: Point[]): {
   const score = clamp01((0.92 - ratio) / (0.92 - 0.62));
 
   if (score < 0.28) {
-    return { match: false, confidence: 0, simplifiedCount: poly.length, concavityRatio: ratio };
+    return {
+      match: false,
+      confidence: 0,
+      simplifiedCount: poly.length,
+      concavityRatio: ratio,
+    };
   }
 
   return {
@@ -308,10 +329,10 @@ function classifyPolygon(vertices: Point[]): RecognizedShape | null {
     const d = dist(vertices[0], vertices[1]);
     if (d < 20) return null;
     return {
-      type: "LÍNEA",
+      type: "LINE",
       confidence: 90,
       vertices: 2,
-      description: `Longitud: ${Math.round(d)}px`,
+      description: `Length: ${Math.round(d)}px`,
       points: vertices,
       color: "hsla(175, 80%, 50%, 1)",
     };
@@ -334,23 +355,23 @@ function classifyPolygon(vertices: Point[]): RecognizedShape | null {
     ];
 
     const sideRatio = sides[0] / sides[2];
-    let subtype = "TRIÁNGULO";
+    let subtype = "TRIANGLE";
     let conf = 70;
 
     if (sideRatio > 0.85) {
-      subtype = "TRIÁNGULO EQUILÁTERO";
+      subtype = "EQUILATERAL TRIANGLE";
       conf = 85 + sideRatio * 15;
     } else if (
       Math.abs(sides[0] - sides[1]) / sides[2] < 0.15 ||
       Math.abs(sides[1] - sides[2]) / sides[2] < 0.15
     ) {
-      subtype = "TRIÁNGULO ISÓSCELES";
+      subtype = "ISOSCELES TRIANGLE";
       conf = 80;
     }
 
     const hasRight = angles.some((a) => Math.abs(a - Math.PI / 2) < 0.2);
     if (hasRight) {
-      subtype = "TRIÁNGULO RECTÁNGULO";
+      subtype = "RIGHT TRIANGLE";
       conf = 85;
     }
 
@@ -358,7 +379,9 @@ function classifyPolygon(vertices: Point[]): RecognizedShape | null {
       type: subtype,
       confidence: Math.min(99, Math.round(conf)),
       vertices: 3,
-      description: `3 vértices · ${sides.map((s) => Math.round(s) + "px").join(" × ")}`,
+      description: `3 vertices · ${sides
+        .map((s) => Math.round(s) + "px")
+        .join(" × ")}`,
       points: ordered,
       color: "hsla(35, 90%, 55%, 1)",
     };
@@ -371,7 +394,13 @@ function classifyPolygon(vertices: Point[]): RecognizedShape | null {
 
     for (let i = 0; i < 4; i++) {
       sides.push(dist(ordered[i], ordered[(i + 1) % 4]));
-      angles.push(angleBetween(ordered[(i + 3) % 4], ordered[i], ordered[(i + 1) % 4]));
+      angles.push(
+        angleBetween(
+          ordered[(i + 3) % 4],
+          ordered[i],
+          ordered[(i + 1) % 4]
+        )
+      );
     }
 
     const sideMin = Math.min(...sides);
@@ -385,10 +414,13 @@ function classifyPolygon(vertices: Point[]): RecognizedShape | null {
 
     if (isRectish && sideRatio > 0.8) {
       return {
-        type: "CUADRADO",
-        confidence: Math.min(99, Math.round(70 + sideRatio * 20 + (1 - maxAngleDiff) * 10)),
+        type: "SQUARE",
+        confidence: Math.min(
+          99,
+          Math.round(70 + sideRatio * 20 + (1 - maxAngleDiff) * 10)
+        ),
         vertices: 4,
-        description: `4 vértices · ángulos ~90°`,
+        description: `4 vertices · angles ~90°`,
         points: ordered,
         color: "hsla(280, 60%, 55%, 1)",
       };
@@ -396,10 +428,15 @@ function classifyPolygon(vertices: Point[]): RecognizedShape | null {
 
     if (isRectish) {
       return {
-        type: "RECTÁNGULO",
-        confidence: Math.min(99, Math.round(75 + (1 - maxAngleDiff / 0.35) * 25)),
+        type: "RECTANGLE",
+        confidence: Math.min(
+          99,
+          Math.round(75 + (1 - maxAngleDiff / 0.35) * 25)
+        ),
         vertices: 4,
-        description: `4 vértices · ${Math.round(sideMin)}×${Math.round(sideMax)}px`,
+        description: `4 vertices · ${Math.round(sideMin)}×${Math.round(
+          sideMax
+        )}px`,
         points: ordered,
         color: "hsla(210, 70%, 55%, 1)",
       };
@@ -407,20 +444,20 @@ function classifyPolygon(vertices: Point[]): RecognizedShape | null {
 
     if (sideRatio > 0.7) {
       return {
-        type: "ROMBO",
+        type: "DIAMOND",
         confidence: Math.min(99, Math.round(65 + sideRatio * 30)),
         vertices: 4,
-        description: `4 vértices · lados similares`,
+        description: `4 vertices · similar sides`,
         points: ordered,
         color: "hsla(330, 70%, 55%, 1)",
       };
     }
 
     return {
-      type: "CUADRILÁTERO",
+      type: "QUADRILATERAL",
       confidence: 60,
       vertices: 4,
-      description: `4 vértices irregulares`,
+      description: `4 irregular vertices`,
       points: ordered,
       color: "hsla(50, 60%, 50%, 1)",
     };
@@ -433,22 +470,24 @@ function classifyPolygon(vertices: Point[]): RecognizedShape | null {
     const base = 62 + reg * 30;
 
     const nameByN: Record<number, string> = {
-      5: "PENTÁGONO",
-      6: "HEXÁGONO",
-      7: "HEPTÁGONO",
-      8: "OCTÁGONO",
-      9: "ENEÁGONO",
-      10: "DECÁGONO",
+      5: "PENTAGON",
+      6: "HEXAGON",
+      7: "HEPTAGON",
+      8: "OCTAGON",
+      9: "ENNEAGON",
+      10: "DECAGON",
     };
 
-    const label = nameByN[n] ?? `POLÍGONO (${n})`;
+    const label = nameByN[n] ?? `POLYGON (${n})`;
     const conf = Math.min(99, Math.round(n <= 10 ? base : 50 + reg * 20));
 
     return {
       type: label,
       confidence: conf,
       vertices: n,
-      description: `${n} vértices detectados · regularidad ${(reg * 100).toFixed(0)}%`,
+      description: `${n} vertices detected · regularity ${(reg * 100).toFixed(
+        0
+      )}%`,
       points: ordered,
       color: n <= 6 ? "hsla(200, 80%, 55%, 1)" : "hsla(60, 60%, 50%, 1)",
     };
@@ -473,9 +512,9 @@ export function recognizeFromPoints(points: Point[]): RecognizedShape | null {
       confidence: co.confidence,
       vertices: 0,
       description:
-        co.type === "CÍRCULO"
-          ? `Radio ≈ ${Math.round(avgR)}px · ${co.extra ?? ""}`
-          : `Óvalo · ${co.extra ?? ""}`,
+        co.type === "CIRCLE"
+          ? `Radius ≈ ${Math.round(avgR)}px · ${co.extra ?? ""}`
+          : `Oval · ${co.extra ?? ""}`,
       points: [c],
       color: "hsla(175, 80%, 50%, 1)",
     };
@@ -487,16 +526,21 @@ export function recognizeFromPoints(points: Point[]): RecognizedShape | null {
     const perim = perimeter(points);
     const eps = Math.max(5, perim * 0.015);
     let poly = rdp(points, eps);
-    if (poly.length > 2 && dist(poly[0], poly[poly.length - 1]) < perim * 0.08) {
+    if (
+      poly.length > 2 &&
+      dist(poly[0], poly[poly.length - 1]) < perim * 0.08
+    ) {
       poly = poly.slice(0, -1);
     }
     poly = orderByAngle(poly);
 
     return {
-      type: "ESTRELLA",
+      type: "STAR",
       confidence: star.confidence,
       vertices: poly.length,
-      description: `Cóncava · ratio ${(star.concavityRatio).toFixed(2)} · ${poly.length} pts`,
+      description: `Concave · ratio ${star.concavityRatio.toFixed(2)} · ${
+        poly.length
+      } pts`,
       points: poly,
       color: "hsla(45, 90%, 60%, 1)",
     };
@@ -509,7 +553,10 @@ export function recognizeFromPoints(points: Point[]): RecognizedShape | null {
 
   // Remove last point if it's close to first (closed shape)
   let verts = simplified;
-  if (verts.length > 2 && dist(verts[0], verts[verts.length - 1]) < perim * 0.1) {
+  if (
+    verts.length > 2 &&
+    dist(verts[0], verts[verts.length - 1]) < perim * 0.1
+  ) {
     verts = verts.slice(0, -1);
   }
 
