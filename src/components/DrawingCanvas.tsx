@@ -1,7 +1,9 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { recognizeFromPoints, type Point, type RecognizedShape } from "@/lib/shapeRecognition";
+import NeuralViz from "./NeuralViz";
 
 type Mode = "draw" | "points";
+type Tab = "canvas" | "neural";
 
 interface Props {
   onShapeRecognized?: (shape: RecognizedShape) => void;
@@ -10,12 +12,14 @@ interface Props {
 export default function DrawingCanvas({ onShapeRecognized }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [mode, setMode] = useState<Mode>("draw");
+  const [tab, setTab] = useState<Tab>("canvas");
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<Point[]>([]);
   const [placedPoints, setPlacedPoints] = useState<Point[]>([]);
   const [result, setResult] = useState<RecognizedShape | null>(null);
   const [history, setHistory] = useState<RecognizedShape[]>([]);
   const [showResult, setShowResult] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const animRef = useRef<number>(0);
   const fadeRef = useRef(0);
 
@@ -24,30 +28,36 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
     setPlacedPoints([]);
     setResult(null);
     setShowResult(false);
+    setIsProcessing(false);
     fadeRef.current = 0;
   }, []);
 
-  // Recognize shape
   const recognize = useCallback(
     (pts: Point[]) => {
-      const shape = recognizeFromPoints(pts);
-      if (shape) {
-        setResult(shape);
-        setShowResult(true);
-        fadeRef.current = 0;
-        setHistory((prev) => [shape, ...prev].slice(0, 20));
-        onShapeRecognized?.(shape);
-      } else {
-        setResult(null);
-        setShowResult(true);
-        fadeRef.current = 0;
-      }
+      setIsProcessing(true);
+      // Small delay for visual effect
+      setTimeout(() => {
+        const shape = recognizeFromPoints(pts);
+        setIsProcessing(false);
+        if (shape) {
+          setResult(shape);
+          setShowResult(true);
+          fadeRef.current = 0;
+          setHistory((prev) => [shape, ...prev].slice(0, 20));
+          onShapeRecognized?.(shape);
+        } else {
+          setResult(null);
+          setShowResult(true);
+          fadeRef.current = 0;
+        }
+      }, 400);
     },
     [onShapeRecognized]
   );
 
   // Canvas rendering
   useEffect(() => {
+    if (tab !== "canvas") return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
@@ -102,7 +112,6 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
 
       // Draw placed points and connections
       if (placedPoints.length > 0) {
-        // Lines between points
         if (placedPoints.length > 1) {
           ctx.strokeStyle = "hsla(175, 80%, 50%, 0.5)";
           ctx.lineWidth = 2;
@@ -117,18 +126,14 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
           ctx.shadowBlur = 0;
         }
 
-        // Points
         for (let i = 0; i < placedPoints.length; i++) {
           const p = placedPoints[i];
-
-          // Outer ring
           ctx.strokeStyle = "hsla(175, 80%, 50%, 0.4)";
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.arc(p.x, p.y, 12, 0, Math.PI * 2);
           ctx.stroke();
 
-          // Inner dot
           ctx.fillStyle = "hsla(175, 80%, 50%, 0.9)";
           ctx.shadowColor = "hsla(175, 80%, 50%, 0.6)";
           ctx.shadowBlur = 10;
@@ -137,7 +142,6 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
           ctx.fill();
           ctx.shadowBlur = 0;
 
-          // Label
           ctx.fillStyle = "hsla(175, 80%, 50%, 0.6)";
           ctx.font = "10px 'JetBrains Mono', monospace";
           ctx.textAlign = "center";
@@ -150,7 +154,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
         fadeRef.current = Math.min(1, fadeRef.current + 0.03);
         const alpha = fadeRef.current;
 
-        if (result.type === "CÍRCULO" && result.points.length === 1) {
+        if ((result.type === "CIRCLE" || result.type === "OVAL") && result.points.length === 1) {
           const c = result.points[0];
           const r = parseInt(result.description.match(/\d+/)?.[0] || "50");
           ctx.strokeStyle = result.color.replace(/[\d.]+\)$/, `${0.8 * alpha})`);
@@ -187,7 +191,6 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
           }
           ctx.shadowBlur = 0;
 
-          // Vertex highlights
           for (const p of pts) {
             ctx.fillStyle = result.color.replace(/[\d.]+\)$/, `${0.9 * alpha})`);
             ctx.shadowColor = result.color;
@@ -214,21 +217,17 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
           const text = result.type;
           const metrics = ctx.measureText(text);
 
-          // Background
           ctx.fillStyle = `hsla(220, 20%, 4%, ${0.85 * labelAlpha})`;
           const pad = 16;
           ctx.fillRect(cx - metrics.width / 2 - pad, cy - 14, metrics.width + pad * 2, 50);
 
-          // Border
           ctx.strokeStyle = result.color.replace(/[\d.]+\)$/, `${0.5 * labelAlpha})`);
           ctx.lineWidth = 1;
           ctx.strokeRect(cx - metrics.width / 2 - pad, cy - 14, metrics.width + pad * 2, 50);
 
-          // Shape name
           ctx.fillStyle = result.color.replace(/[\d.]+\)$/, `${labelAlpha})`);
           ctx.fillText(text, cx, cy + 6);
 
-          // Confidence
           ctx.font = "11px 'JetBrains Mono', monospace";
           ctx.fillStyle = `hsla(180, 10%, 75%, ${labelAlpha * 0.7})`;
           ctx.fillText(`${result.confidence}% confidence · ${result.description}`, cx, cy + 28);
@@ -243,7 +242,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
       cancelAnimationFrame(animRef.current);
       window.removeEventListener("resize", resize);
     };
-  }, [currentPath, placedPoints, result, showResult]);
+  }, [currentPath, placedPoints, result, showResult, tab]);
 
   // Mouse handlers
   const getPos = (e: React.MouseEvent): Point => ({
@@ -252,6 +251,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
   });
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (tab !== "canvas") return;
     if (mode === "draw") {
       clear();
       setIsDrawing(true);
@@ -265,12 +265,14 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (tab !== "canvas") return;
     if (mode === "draw" && isDrawing) {
       setCurrentPath((prev) => [...prev, getPos(e)]);
     }
   };
 
   const handleMouseUp = () => {
+    if (tab !== "canvas") return;
     if (mode === "draw" && isDrawing) {
       setIsDrawing(false);
       if (currentPath.length > 5) {
@@ -285,16 +287,30 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
     }
   };
 
+  const activePoints = mode === "draw" ? currentPath : placedPoints;
+
   return (
     <div className="relative w-full h-screen overflow-hidden">
+      {/* Canvas layer */}
       <canvas
         ref={canvasRef}
-        className="fixed inset-0 w-full h-full cursor-crosshair"
+        className={`fixed inset-0 w-full h-full ${tab === "canvas" ? "cursor-crosshair" : "hidden"}`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       />
+
+      {/* Neural viz layer */}
+      {tab === "neural" && (
+        <div className="fixed inset-0 w-full h-full bg-background">
+          <NeuralViz
+            inputPoints={activePoints}
+            result={result}
+            isProcessing={isProcessing}
+          />
+        </div>
+      )}
 
       {/* Top bar */}
       <div className="fixed top-0 inset-x-0 z-20 pointer-events-none">
@@ -305,33 +321,60 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
             <div className="flex items-center gap-2 mt-1">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
               <span className="text-primary text-glow">
-                {mode === "draw" ? "FREE DRAW" : "PLACE POINTS"}
+                {tab === "canvas"
+                  ? mode === "draw" ? "FREE DRAW" : "PLACE POINTS"
+                  : "NEURAL NETWORK VIEW"}
               </span>
             </div>
           </div>
 
-          {/* Mode switcher */}
+          {/* Tab switcher */}
           <div className="pointer-events-auto flex gap-1 bg-card/80 rounded-md p-1 border border-border/50 border-glow backdrop-blur-sm">
             <button
-              onClick={() => { setMode("draw"); clear(); }}
+              onClick={() => setTab("canvas")}
               className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                mode === "draw"
+                tab === "canvas"
                   ? "bg-primary/20 text-primary border-glow"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              ✏️ Draw
+              🎨 Canvas
             </button>
             <button
-              onClick={() => { setMode("points"); clear(); }}
+              onClick={() => setTab("neural")}
               className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                mode === "points"
+                tab === "neural"
                   ? "bg-primary/20 text-primary border-glow"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              📍 Points
+              🧠 Neural
             </button>
+            {tab === "canvas" && (
+              <>
+                <div className="w-px bg-border/30 mx-1" />
+                <button
+                  onClick={() => { setMode("draw"); clear(); }}
+                  className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                    mode === "draw"
+                      ? "bg-accent/20 text-accent-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  ✏️ Draw
+                </button>
+                <button
+                  onClick={() => { setMode("points"); clear(); }}
+                  className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                    mode === "points"
+                      ? "bg-accent/20 text-accent-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  📍 Points
+                </button>
+              </>
+            )}
           </div>
 
           {/* Counter */}
@@ -345,7 +388,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
       </div>
 
       {/* Points mode: finish button */}
-      {mode === "points" && placedPoints.length >= 2 && !showResult && (
+      {tab === "canvas" && mode === "points" && placedPoints.length >= 2 && !showResult && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-20">
           <button
             onClick={finishPoints}
@@ -369,7 +412,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
       )}
 
       {/* No match */}
-      {showResult && !result && (
+      {showResult && !result && tab === "canvas" && (
         <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none">
           <div className="px-6 py-4 bg-card/80 border border-destructive/30 rounded-md font-mono text-sm text-center backdrop-blur-sm">
             <div className="text-destructive">✗ ✗ NOT RECOGNIZED</div>
@@ -400,9 +443,11 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
 
       {/* Hint */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-none font-mono text-xs text-muted-foreground/30">
-        {mode === "draw"
-          ? "draw a shape with your mouse"
-          : "click to place vertices, then press recognize"}
+        {tab === "canvas"
+          ? mode === "draw"
+            ? "draw a shape with your mouse"
+            : "click to place vertices, then press recognize"
+          : "draw a shape on canvas → see neural activations here"}
       </div>
 
       {/* Scanline overlay */}
