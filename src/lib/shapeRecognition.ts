@@ -158,21 +158,22 @@ function circleOrOval(points: Point[]): {
   confidence: number;
   extra?: string;
 } {
-  if (points.length < 10) return { type: null, confidence: 0 };
+  if (points.length < 8) return { type: null, confidence: 0 };
 
-  // closure check
+  // closure check — generous for hand-drawn
   const closeDist = dist(points[0], points[points.length - 1]);
   const perim = perimeter(points);
-  const isClosed = closeDist < Math.max(18, perim * 0.08);
+  const isClosed = closeDist < Math.max(40, perim * 0.15);
   if (!isClosed) return { type: null, confidence: 0 };
 
   // simplify a bit for area
-  const eps = Math.max(6, perim * 0.02);
+  const eps = Math.max(4, perim * 0.015);
   let poly = rdp(points, eps);
-  if (poly.length > 2 && dist(poly[0], poly[poly.length - 1]) < perim * 0.08) {
+  if (poly.length > 2 && dist(poly[0], poly[poly.length - 1]) < perim * 0.12) {
     poly = poly.slice(0, -1);
   }
-  if (poly.length < 6) return { type: null, confidence: 0 };
+  // Even rough circles should have several simplified points
+  if (poly.length < 5) return { type: null, confidence: 0 };
 
   poly = orderByAngle(poly);
 
@@ -180,7 +181,7 @@ function circleOrOval(points: Point[]): {
   const P = perim;
   if (A <= 0 || P <= 0) return { type: null, confidence: 0 };
 
-  // circularity: circle ≈ 1
+  // circularity: perfect circle = 1
   const circ = (4 * Math.PI * A) / (P * P);
 
   const box = bbox(points);
@@ -188,45 +189,63 @@ function circleOrOval(points: Point[]): {
   const maxSide = Math.max(box.w, box.h);
   const ar = maxSide / minSide; // aspect ratio >= 1
 
-  // radius constancy (your old idea, but softened)
+  // radius constancy
   const c = centroid(points);
   const ds = points.map((p) => dist(p, c));
   const avgR = ds.reduce((a, b) => a + b, 0) / ds.length;
-  if (avgR < 12) return { type: null, confidence: 0 };
+  if (avgR < 10) return { type: null, confidence: 0 };
   const avgDev =
     ds.map((d) => Math.abs(d - avgR) / avgR).reduce((a, b) => a + b, 0) /
     ds.length;
 
-  // Scores (tuned for hand-drawn)
-  // circle: high circularity + ar near 1 + dev small
-  const sCirc = clamp01((circ - 0.70) / (0.95 - 0.70));
-  const sARCircle = clamp01((1.28 - ar) / (1.28 - 1.02));
-  const sDev = clamp01((0.30 - avgDev) / (0.30 - 0.10));
-  const circleScore = sCirc * sARCircle * lerp(0.6, 1.0, sDev);
+  // ---------- Circle score (relaxed for hand-drawn) ----------
+  // circularity: accept from 0.55 (very rough) to 0.95 (smooth)
+  const sCirc = clamp01((circ - 0.50) / (0.90 - 0.50));
+  // aspect ratio: accept up to 1.45 for circle
+  const sARCircle = clamp01((1.45 - ar) / (1.45 - 1.0));
+  // radius deviation: accept up to 0.40
+  const sDev = clamp01((0.40 - avgDev) / (0.40 - 0.08));
+  // Combined — use additive blend so one weak factor doesn't kill it
+  const circleScore = sCirc * 0.45 + sARCircle * 0.30 + sDev * 0.25;
 
-  // oval: decent circularity but ar > 1, dev can be a bit higher
-  const sOvalCirc = clamp01((circ - 0.58) / (0.90 - 0.58));
-  const sAROVal = clamp01((ar - 1.10) / (2.20 - 1.10));
-  const ovalScore = sOvalCirc * sAROVal;
+  // ---------- Oval score ----------
+  const sOvalCirc = clamp01((circ - 0.45) / (0.85 - 0.45));
+  const sAROval = clamp01((ar - 1.15) / (2.5 - 1.15));
+  const sOvalDev = clamp01((0.50 - avgDev) / (0.50 - 0.10));
+  const ovalScore = sOvalCirc * 0.4 + sAROval * 0.35 + sOvalDev * 0.25;
 
-  if (circleScore < 0.18 && ovalScore < 0.18)
+  // Minimum threshold lowered
+  if (circleScore < 0.25 && ovalScore < 0.25)
     return { type: null, confidence: 0 };
 
-  if (circleScore >= ovalScore) {
-    const conf = Math.round(60 + circleScore * 39);
+  if (circleScore >= ovalScore && ar < 1.5) {
+    const conf = Math.round(55 + circleScore * 44);
     return {
       type: "CIRCLE",
       confidence: Math.min(99, conf),
-      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)}`,
+      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
     };
   }
 
-  const conf = Math.round(55 + ovalScore * 44);
-  return {
-    type: "OVAL",
-    confidence: Math.min(99, conf),
-    extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)}`,
-  };
+  if (ovalScore >= 0.25) {
+    const conf = Math.round(50 + ovalScore * 49);
+    return {
+      type: "OVAL",
+      confidence: Math.min(99, conf),
+      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
+    };
+  }
+
+  // Fallback: if it's round enough, call it a circle
+  if (circ > 0.55 && avgDev < 0.35 && ar < 1.6) {
+    return {
+      type: "CIRCLE",
+      confidence: Math.min(85, Math.round(50 + circ * 30)),
+      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
+    };
+  }
+
+  return { type: null, confidence: 0 };
 }
 
 // ---------- Star detection (concavity via hull ratio) ----------
