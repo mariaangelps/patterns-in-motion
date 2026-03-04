@@ -198,49 +198,36 @@ function circleOrOval(points: Point[]): {
     ds.map((d) => Math.abs(d - avgR) / avgR).reduce((a, b) => a + b, 0) /
     ds.length;
 
-  // ---------- Circle score (relaxed for hand-drawn) ----------
-  // circularity: accept from 0.55 (very rough) to 0.95 (smooth)
-  const sCirc = clamp01((circ - 0.50) / (0.90 - 0.50));
-  // aspect ratio: accept up to 1.45 for circle
-  const sARCircle = clamp01((1.45 - ar) / (1.45 - 1.0));
-  // radius deviation: accept up to 0.40
-  const sDev = clamp01((0.40 - avgDev) / (0.40 - 0.08));
-  // Combined — use additive blend so one weak factor doesn't kill it
-  const circleScore = sCirc * 0.45 + sARCircle * 0.30 + sDev * 0.25;
+  // Hard minimum: if circularity is terrible, it's not round at all
+  if (circ < 0.45) return { type: null, confidence: 0 };
+
+  // ---------- Circle score ----------
+  const sCirc = clamp01((circ - 0.55) / (0.95 - 0.55));
+  const sARCircle = clamp01((1.40 - ar) / (1.40 - 1.0));
+  const sDev = clamp01((0.35 - avgDev) / (0.35 - 0.08));
+  const circleScore = sCirc > 0 ? sCirc * 0.50 + sARCircle * 0.25 + sDev * 0.25 : 0;
 
   // ---------- Oval score ----------
-  const sOvalCirc = clamp01((circ - 0.45) / (0.85 - 0.45));
+  const sOvalCirc = clamp01((circ - 0.50) / (0.85 - 0.50));
   const sAROval = clamp01((ar - 1.15) / (2.5 - 1.15));
-  const sOvalDev = clamp01((0.50 - avgDev) / (0.50 - 0.10));
-  const ovalScore = sOvalCirc * 0.4 + sAROval * 0.35 + sOvalDev * 0.25;
+  const sOvalDev = clamp01((0.45 - avgDev) / (0.45 - 0.10));
+  const ovalScore = sOvalCirc > 0 ? sOvalCirc * 0.45 + sAROval * 0.30 + sOvalDev * 0.25 : 0;
 
-  // Minimum threshold lowered
-  if (circleScore < 0.25 && ovalScore < 0.25)
+  if (circleScore < 0.30 && ovalScore < 0.30)
     return { type: null, confidence: 0 };
 
   if (circleScore >= ovalScore && ar < 1.5) {
-    const conf = Math.round(55 + circleScore * 44);
     return {
       type: "CIRCLE",
-      confidence: Math.min(99, conf),
+      confidence: Math.min(99, Math.round(55 + circleScore * 44)),
       extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
     };
   }
 
-  if (ovalScore >= 0.25) {
-    const conf = Math.round(50 + ovalScore * 49);
+  if (ovalScore >= 0.30) {
     return {
       type: "OVAL",
-      confidence: Math.min(99, conf),
-      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
-    };
-  }
-
-  // Fallback: if it's round enough, call it a circle
-  if (circ > 0.55 && avgDev < 0.35 && ar < 1.6) {
-    return {
-      type: "CIRCLE",
-      confidence: Math.min(85, Math.round(50 + circ * 30)),
+      confidence: Math.min(99, Math.round(50 + ovalScore * 49)),
       extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
     };
   }
