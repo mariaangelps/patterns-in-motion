@@ -508,84 +508,106 @@ function classifyPolygon(vertices: Point[]): RecognizedShape | null {
   return null;
 }
 
-// ---------- Heart detection (strict) ----------
+// ---------- Heart detection ----------
 function isHeart(points: Point[]): { match: boolean; confidence: number } {
-  if (points.length < 25) return { match: false, confidence: 0 };
+  if (points.length < 15) return { match: false, confidence: 0 };
 
   const perim = perimeter(points);
   const closeDist = dist(points[0], points[points.length - 1]);
-  const isClosed = closeDist < Math.max(30, perim * 0.10);
+  const isClosed = closeDist < Math.max(40, perim * 0.15);
   if (!isClosed) return { match: false, confidence: 0 };
 
   const box = bbox(points);
   const ar = box.w / Math.max(1, box.h);
 
-  // Heart aspect ratio: roughly square to slightly wider
-  if (ar < 0.75 || ar > 1.5) return { match: false, confidence: 0 };
-
-  // Must be big enough
-  if (box.w < 40 || box.h < 40) return { match: false, confidence: 0 };
+  // Heart: roughly square to slightly wider or taller
+  if (ar < 0.5 || ar > 1.8) return { match: false, confidence: 0 };
+  if (box.w < 30 || box.h < 30) return { match: false, confidence: 0 };
 
   const centerX = (box.minX + box.maxX) / 2;
 
-  // Find the bottommost point — must be a sharp "V" tip
+  // Find the bottommost point
   let bottomIdx = 0;
   for (let i = 1; i < points.length; i++) {
     if (points[i].y > points[bottomIdx].y) bottomIdx = i;
   }
   const bottom = points[bottomIdx];
 
-  // Bottom tip must be centered (strict)
+  // Bottom tip should be roughly centered (relaxed)
   const xOffsetRatio = Math.abs(bottom.x - centerX) / box.w;
-  if (xOffsetRatio > 0.15) return { match: false, confidence: 0 };
+  if (xOffsetRatio > 0.25) return { match: false, confidence: 0 };
 
-  // Bottom tip must be at very bottom
+  // Bottom tip should be in the lower portion
   const yBottomRatio = (bottom.y - box.minY) / box.h;
-  if (yBottomRatio < 0.82) return { match: false, confidence: 0 };
+  if (yBottomRatio < 0.70) return { match: false, confidence: 0 };
 
-  // Check for two lobes: points in top 40% of shape
-  const topThreshold = box.minY + box.h * 0.4;
+  // Check for two lobes: points in top 50% of shape
+  const topThreshold = box.minY + box.h * 0.50;
   const topPoints = points.filter((p) => p.y < topThreshold);
   const leftTop = topPoints.filter((p) => p.x < centerX);
   const rightTop = topPoints.filter((p) => p.x >= centerX);
 
-  if (leftTop.length < 5 || rightTop.length < 5)
+  if (leftTop.length < 3 || rightTop.length < 3)
     return { match: false, confidence: 0 };
 
   // Find peaks of each lobe
   const leftPeak = leftTop.reduce((a, b) => (a.y < b.y ? a : b));
   const rightPeak = rightTop.reduce((a, b) => (a.y < b.y ? a : b));
 
-  // Both peaks must be in top 30%
+  // Both peaks must be in top 45%
   const leftPeakRatio = (leftPeak.y - box.minY) / box.h;
   const rightPeakRatio = (rightPeak.y - box.minY) / box.h;
-  if (leftPeakRatio > 0.30 || rightPeakRatio > 0.30)
+  if (leftPeakRatio > 0.45 || rightPeakRatio > 0.45)
     return { match: false, confidence: 0 };
 
-  // MUST have a clear dip between lobes (the "V" at top center)
+  // Check for a dip between lobes at top center
   const topCenterPoints = topPoints.filter(
-    (p) => Math.abs(p.x - centerX) < box.w * 0.12
+    (p) => Math.abs(p.x - centerX) < box.w * 0.18
   );
-  if (topCenterPoints.length === 0) return { match: false, confidence: 0 };
 
-  const topCenterLowest = topCenterPoints.reduce((a, b) =>
-    a.y > b.y ? a : b
-  );
-  const avgPeakY = (leftPeak.y + rightPeak.y) / 2;
-  const dipAmount = topCenterLowest.y - avgPeakY;
+  let dipScore = 0;
+  if (topCenterPoints.length > 0) {
+    const topCenterLowest = topCenterPoints.reduce((a, b) =>
+      a.y > b.y ? a : b
+    );
+    const avgPeakY = (leftPeak.y + rightPeak.y) / 2;
+    const dipAmount = topCenterLowest.y - avgPeakY;
 
-  // Dip must be significant (at least 10% of height)
-  if (dipAmount < box.h * 0.10) return { match: false, confidence: 0 };
+    if (dipAmount > box.h * 0.05) {
+      dipScore = clamp01(dipAmount / (box.h * 0.25));
+    }
+  }
 
-  // Check curvature: hearts should NOT simplify to few straight segments
-  const eps = Math.max(5, perim * 0.02);
-  const simplified = rdp(points, eps);
-  // A heart has curves, so simplified should still have many points
-  if (simplified.length < 8) return { match: false, confidence: 0 };
+  // Also check: the shape narrows toward the bottom (V shape)
+  const bottomQuarter = points.filter((p) => p.y > box.minY + box.h * 0.75);
+  const topQuarter = points.filter((p) => p.y < box.minY + box.h * 0.35);
+  if (bottomQuarter.length > 0 && topQuarter.length > 0) {
+    const bottomWidth =
+      Math.max(...bottomQuarter.map((p) => p.x)) -
+      Math.min(...bottomQuarter.map((p) => p.x));
+    const topWidth =
+      Math.max(...topQuarter.map((p) => p.x)) -
+      Math.min(...topQuarter.map((p) => p.x));
+    // Top should be wider than bottom (heart narrows downward)
+    const narrowRatio = topWidth > 0 ? bottomWidth / topWidth : 1;
+    if (narrowRatio < 0.75) {
+      // Good V-shape toward bottom
+      const vScore = clamp01((0.75 - narrowRatio) / 0.50);
+      const totalScore = dipScore * 0.6 + vScore * 0.4;
+      if (totalScore > 0.15) {
+        const conf = Math.round(65 + totalScore * 34);
+        return { match: true, confidence: Math.min(99, conf) };
+      }
+    }
+  }
 
-  const dipScore = clamp01(dipAmount / (box.h * 0.30));
-  const conf = Math.round(70 + dipScore * 29);
-  return { match: true, confidence: Math.min(99, conf) };
+  // If dip alone is strong enough
+  if (dipScore > 0.35) {
+    const conf = Math.round(65 + dipScore * 30);
+    return { match: true, confidence: Math.min(99, conf) };
+  }
+
+  return { match: false, confidence: 0 };
 }
 
 export function recognizeFromPoints(points: Point[]): RecognizedShape | null {
