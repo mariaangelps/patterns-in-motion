@@ -177,6 +177,25 @@ function circleOrOval(points: Point[]): {
 
   poly = orderByAngle(poly);
 
+  // ---- Polygon gate: block rectangles/squares being labeled as OVAL/CIRCLE ----
+  if (poly.length <= 10) {
+    const angles: number[] = [];
+    for (let i = 0; i < poly.length; i++) {
+      const prev = poly[(i - 1 + poly.length) % poly.length];
+      const curr = poly[i];
+      const next = poly[(i + 1) % poly.length];
+      angles.push(angleBetween(prev, curr, next));
+    }
+
+    // "Corner" = noticeably less than ~135 degrees
+    const CORNER_THRESH = (135 * Math.PI) / 180;
+    const cornerCount = angles.filter((a) => a < CORNER_THRESH).length;
+
+    // rectangles typically yield ~4 corners after RDP;
+    // using >=3 keeps it forgiving for hand-drawn shapes.
+    if (cornerCount >= 3) return { type: null, confidence: 0 };
+  }
+
   const A = polygonArea(poly);
   const P = perim;
   if (A <= 0 || P <= 0) return { type: null, confidence: 0 };
@@ -199,13 +218,9 @@ function circleOrOval(points: Point[]): {
     ds.length;
 
   // ---------- Circle score (relaxed for hand-drawn) ----------
-  // circularity: accept from 0.55 (very rough) to 0.95 (smooth)
   const sCirc = clamp01((circ - 0.50) / (0.90 - 0.50));
-  // aspect ratio: accept up to 1.45 for circle
   const sARCircle = clamp01((1.45 - ar) / (1.45 - 1.0));
-  // radius deviation: accept up to 0.40
   const sDev = clamp01((0.40 - avgDev) / (0.40 - 0.08));
-  // Combined — use additive blend so one weak factor doesn't kill it
   const circleScore = sCirc * 0.45 + sARCircle * 0.30 + sDev * 0.25;
 
   // ---------- Oval score ----------
@@ -214,7 +229,6 @@ function circleOrOval(points: Point[]): {
   const sOvalDev = clamp01((0.50 - avgDev) / (0.50 - 0.10));
   const ovalScore = sOvalCirc * 0.4 + sAROval * 0.35 + sOvalDev * 0.25;
 
-  // Minimum threshold lowered
   if (circleScore < 0.25 && ovalScore < 0.25)
     return { type: null, confidence: 0 };
 
@@ -223,7 +237,9 @@ function circleOrOval(points: Point[]): {
     return {
       type: "CIRCLE",
       confidence: Math.min(99, conf),
-      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
+      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(
+        2
+      )} · dev ${avgDev.toFixed(2)}`,
     };
   }
 
@@ -232,7 +248,9 @@ function circleOrOval(points: Point[]): {
     return {
       type: "OVAL",
       confidence: Math.min(99, conf),
-      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
+      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(
+        2
+      )} · dev ${avgDev.toFixed(2)}`,
     };
   }
 
@@ -241,7 +259,9 @@ function circleOrOval(points: Point[]): {
     return {
       type: "CIRCLE",
       confidence: Math.min(85, Math.round(50 + circ * 30)),
-      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
+      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(
+        2
+      )} · dev ${avgDev.toFixed(2)}`,
     };
   }
 
@@ -303,7 +323,6 @@ function isStarLike(points: Point[]): {
   }
 
   const ratio = A / Ah; // convex ~ 1, star smaller
-  // score ramps up as ratio goes down
   const score = clamp01((0.92 - ratio) / (0.92 - 0.62));
 
   if (score < 0.28) {
@@ -325,7 +344,6 @@ function isStarLike(points: Point[]): {
 
 // ---------- Polygon classification helpers ----------
 function regularityScore(ordered: Point[]): number {
-  // measures how equal the side lengths are (1 = perfect)
   const n = ordered.length;
   if (n < 3) return 0;
   const sides: number[] = [];
