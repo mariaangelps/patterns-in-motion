@@ -188,12 +188,12 @@ function circleOrOval(points: Point[]): {
     }
 
     // "Corner" = noticeably less than ~135 degrees
-    const CORNER_THRESH = (135 * Math.PI) / 180;
+    const CORNER_THRESH = (110 * Math.PI) / 180;
     const cornerCount = angles.filter((a) => a < CORNER_THRESH).length;
 
-    // rectangles typically yield ~4 corners after RDP;
-    // using >=3 keeps it forgiving for hand-drawn shapes.
-    if (cornerCount >= 3) return { type: null, confidence: 0 };
+    // rectangles typically yield 4 sharp corners after RDP;
+    // require 4+ sharp corners to block, so rounded shapes pass through.
+    if (cornerCount >= 4) return { type: null, confidence: 0 };
   }
 
   const A = polygonArea(poly);
