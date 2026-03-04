@@ -10,20 +10,9 @@ const SHAPE_ICONS: Record<string, string> = {
   LINE: "━━━",
   TRIANGLE: "△",
   SQUARE: "□",
-  RECTANGLE: "▭",
   DIAMOND: "◇",
   PENTAGON: "⬠",
   HEXAGON: "⬡",
-  HEPTAGON: "⬡",
-  OCTAGON: "⯃",
-  NONAGON: "⬡",
-  DECAGON: "⬡",
-  HENDECAGON: "⬡",
-  DODECAGON: "⬡",
-  CIRCLE: "○",
-  OVAL: "⬭",
-  STAR: "★",
-  HEART: "♥",
 };
 
 export default function HUD({ detectedPatterns, activePatterns }: HUDProps) {
