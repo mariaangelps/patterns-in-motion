@@ -35,7 +35,7 @@ function angleBetween(a: Point, b: Point, c: Point): number {
   const ab = { x: a.x - b.x, y: a.y - b.y };
   const cb = { x: c.x - b.x, y: c.y - b.y };
   const dot = ab.x * cb.x + ab.y * cb.y;
-  const cross = ab.x * cb.y - (ab.y * cb.x);
+  const cross = ab.x * cb.y - ab.y * cb.x;
   return Math.atan2(Math.abs(cross), dot);
 }
 
@@ -148,21 +148,11 @@ function clamp01(x: number) {
   return Math.max(0, Math.min(1, x));
 }
 
-// Count “dominant straight edges” in simplified polyline.
-// Multiple long straight segments => usually polygon/box, not circle.
-function countLongStraightSegments(poly: Point[], perim: number) {
-  if (poly.length < 2) return 0;
-  let count = 0;
-  const longEdge = perim * 0.12; // 12% of total perimeter
-
-  for (let i = 0; i < poly.length - 1; i++) {
-    const segLen = dist(poly[i], poly[i + 1]);
-    if (segLen >= longEdge) count++;
-  }
-  return count;
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
 }
 
-// ---------- Circle / Oval detection (robust + anti-square/line gates) ----------
+// ---------- Circle / Oval detection (robust) ----------
 function circleOrOval(points: Point[]): {
   type: "CIRCLE" | "OVAL" | null;
   confidence: number;
@@ -176,24 +166,14 @@ function circleOrOval(points: Point[]): {
   const isClosed = closeDist < Math.max(40, perim * 0.15);
   if (!isClosed) return { type: null, confidence: 0 };
 
-  const box = bbox(points);
-  if (box.w < 10 || box.h < 10) return { type: null, confidence: 0 };
-
-  // simplify for area + edge checks
+  // simplify a bit for area
   const eps = Math.max(4, perim * 0.015);
   let poly = rdp(points, eps);
-
-  // drop duplicate closing point if it exists
   if (poly.length > 2 && dist(poly[0], poly[poly.length - 1]) < perim * 0.12) {
     poly = poly.slice(0, -1);
   }
-
-  // circles should not collapse to just a couple points
+  // Even rough circles should have several simplified points
   if (poly.length < 5) return { type: null, confidence: 0 };
-
-  // --- HARD BLOCKERS: stop boxes/polygons/skinny loops being circles ---
-  const longStraights = countLongStraightSegments(poly, perim);
-  if (longStraights >= 3) return { type: null, confidence: 0 };
 
   poly = orderByAngle(poly);
 
@@ -201,78 +181,54 @@ function circleOrOval(points: Point[]): {
   const P = perim;
   if (A <= 0 || P <= 0) return { type: null, confidence: 0 };
 
-  // thin/line-like loop killer: area relative to bounding box
-  const fill = A / Math.max(1, box.w * box.h);
-  if (fill < 0.10) return { type: null, confidence: 0 };
-
-  // convex hull ratio + small vertex count: squares/rects look "too convex" + few points
-  const hull = convexHull(poly);
-  const Ah = polygonArea(hull);
-  if (Ah > 0) {
-    const convexRatio = A / Ah;
-    if (convexRatio > 0.97 && poly.length <= 7) {
-      return { type: null, confidence: 0 };
-    }
-  }
-
-  // circularity
+  // circularity: perfect circle = 1
   const circ = (4 * Math.PI * A) / (P * P);
 
+  const box = bbox(points);
   const minSide = Math.max(1, Math.min(box.w, box.h));
   const maxSide = Math.max(box.w, box.h);
-  const ar = maxSide / minSide;
+  const ar = maxSide / minSide; // aspect ratio >= 1
 
   // radius constancy
   const c = centroid(points);
   const ds = points.map((p) => dist(p, c));
   const avgR = ds.reduce((a, b) => a + b, 0) / ds.length;
   if (avgR < 10) return { type: null, confidence: 0 };
-
   const avgDev =
     ds.map((d) => Math.abs(d - avgR) / avgR).reduce((a, b) => a + b, 0) /
     ds.length;
 
+  // Hard minimum: if circularity is terrible, it's not round at all
+  if (circ < 0.45) return { type: null, confidence: 0 };
+
   // ---------- Circle score ----------
-  // raised circ floor to avoid squares winning
-  const sCirc = clamp01((circ - 0.60) / (0.90 - 0.60));
-  const sARCircle = clamp01((1.45 - ar) / (1.45 - 1.0));
-  const sDev = clamp01((0.40 - avgDev) / (0.40 - 0.08));
-  const circleScore = sCirc * 0.50 + sARCircle * 0.25 + sDev * 0.25;
+  const sCirc = clamp01((circ - 0.55) / (0.95 - 0.55));
+  const sARCircle = clamp01((1.40 - ar) / (1.40 - 1.0));
+  const sDev = clamp01((0.35 - avgDev) / (0.35 - 0.08));
+  const circleScore = sCirc > 0 ? sCirc * 0.50 + sARCircle * 0.25 + sDev * 0.25 : 0;
 
   // ---------- Oval score ----------
-  const sOvalCirc = clamp01((circ - 0.45) / (0.85 - 0.45));
+  const sOvalCirc = clamp01((circ - 0.50) / (0.85 - 0.50));
   const sAROval = clamp01((ar - 1.15) / (2.5 - 1.15));
-  const sOvalDev = clamp01((0.50 - avgDev) / (0.50 - 0.10));
-  const ovalScore = sOvalCirc * 0.4 + sAROval * 0.35 + sOvalDev * 0.25;
+  const sOvalDev = clamp01((0.45 - avgDev) / (0.45 - 0.10));
+  const ovalScore = sOvalCirc > 0 ? sOvalCirc * 0.45 + sAROval * 0.30 + sOvalDev * 0.25 : 0;
 
-  // thresholds
-  if (circleScore < 0.35 && ovalScore < 0.25)
+  if (circleScore < 0.30 && ovalScore < 0.30)
     return { type: null, confidence: 0 };
 
   if (circleScore >= ovalScore && ar < 1.5) {
-    const conf = Math.round(55 + circleScore * 44);
     return {
       type: "CIRCLE",
-      confidence: Math.min(99, conf),
-      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)} · fill ${fill.toFixed(2)}`,
+      confidence: Math.min(99, Math.round(55 + circleScore * 44)),
+      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
     };
   }
 
-  if (ovalScore >= 0.28) {
-    const conf = Math.round(50 + ovalScore * 49);
+  if (ovalScore >= 0.30) {
     return {
       type: "OVAL",
-      confidence: Math.min(99, conf),
-      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)} · fill ${fill.toFixed(2)}`,
-    };
-  }
-
-  // fallback (tight!)
-  if (circ > 0.72 && avgDev < 0.25 && ar < 1.25 && fill > 0.22) {
-    return {
-      type: "CIRCLE",
-      confidence: Math.min(85, Math.round(55 + circ * 25)),
-      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)} · fill ${fill.toFixed(2)}`,
+      confidence: Math.min(99, Math.round(50 + ovalScore * 49)),
+      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
     };
   }
 
@@ -333,7 +289,8 @@ function isStarLike(points: Point[]): {
     };
   }
 
-  const ratio = A / Ah;
+  const ratio = A / Ah; // convex ~ 1, star smaller
+  // score ramps up as ratio goes down
   const score = clamp01((0.92 - ratio) / (0.92 - 0.62));
 
   if (score < 0.28) {
@@ -355,6 +312,7 @@ function isStarLike(points: Point[]): {
 
 // ---------- Polygon classification helpers ----------
 function regularityScore(ordered: Point[]): number {
+  // measures how equal the side lengths are (1 = perfect)
   const n = ordered.length;
   if (n < 3) return 0;
   const sides: number[] = [];
@@ -369,6 +327,7 @@ function regularityScore(ordered: Point[]): number {
   return clamp01(1 - dev / 0.35);
 }
 
+// Detect shape from simplified vertices
 function classifyPolygon(vertices: Point[]): RecognizedShape | null {
   const n = vertices.length;
 
@@ -521,12 +480,18 @@ function classifyPolygon(vertices: Point[]): RecognizedShape | null {
       6: "HEXAGON",
       7: "HEPTAGON",
       8: "OCTAGON",
-      9: "ENNEAGON",
+      9: "NONAGON",
       10: "DECAGON",
+      11: "HENDECAGON",
+      12: "DODECAGON",
+      13: "TRIDECAGON",
+      14: "TETRADECAGON",
+      15: "PENTADECAGON",
+      16: "HEXADECAGON",
     };
 
     const label = nameByN[n] ?? `POLYGON (${n})`;
-    const conf = Math.min(99, Math.round(n <= 10 ? base : 50 + reg * 20));
+    const conf = Math.min(99, Math.round(n <= 16 ? base : 50 + reg * 20));
 
     return {
       type: label,
@@ -543,49 +508,106 @@ function classifyPolygon(vertices: Point[]): RecognizedShape | null {
   return null;
 }
 
-/**
- * Anti-polygon false positive gate:
- * If RDP produces 5–8 vertices but the stroke is round-ish (high circularity),
- * avoid forcing labels like HEXAGON on a messy circle.
- */
-function roundishAvoidPolygon(points: Point[], verts: Point[]) {
-  if (verts.length < 5 || verts.length > 8) return null;
+// ---------- Heart detection ----------
+function isHeart(points: Point[]): { match: boolean; confidence: number } {
+  if (points.length < 15) return { match: false, confidence: 0 };
 
   const perim = perimeter(points);
-  if (perim <= 0) return null;
+  const closeDist = dist(points[0], points[points.length - 1]);
+  const isClosed = closeDist < Math.max(40, perim * 0.15);
+  if (!isClosed) return { match: false, confidence: 0 };
 
-  const ord = orderByAngle(verts);
-  const A = polygonArea(ord);
-  const circ = (4 * Math.PI * A) / Math.max(1, perim * perim);
+  const box = bbox(points);
+  const ar = box.w / Math.max(1, box.h);
 
-  // If it's quite round, treat it as oval/circle-ish instead of polygon.
-  // 0.62 is a good "round-ish" cutoff; raise to 0.68 if you want stricter.
-  if (circ > 0.62) {
-    const c = centroid(points);
-    const box = bbox(points);
-    const ar = Math.max(box.w, box.h) / Math.max(1, Math.min(box.w, box.h));
+  // Heart: roughly square to slightly wider or taller
+  if (ar < 0.5 || ar > 1.8) return { match: false, confidence: 0 };
+  if (box.w < 30 || box.h < 30) return { match: false, confidence: 0 };
 
-    // Choose circle vs oval-ish based on AR
-    const type = ar < 1.25 ? "CIRCLE" : "OVAL";
+  const centerX = (box.minX + box.maxX) / 2;
 
-    const confidence = Math.min(
-      88,
-      Math.max(55, Math.round(55 + (circ - 0.62) * 90))
+  // Find the bottommost point
+  let bottomIdx = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i].y > points[bottomIdx].y) bottomIdx = i;
+  }
+  const bottom = points[bottomIdx];
+
+  // Bottom tip should be roughly centered (relaxed)
+  const xOffsetRatio = Math.abs(bottom.x - centerX) / box.w;
+  if (xOffsetRatio > 0.25) return { match: false, confidence: 0 };
+
+  // Bottom tip should be in the lower portion
+  const yBottomRatio = (bottom.y - box.minY) / box.h;
+  if (yBottomRatio < 0.70) return { match: false, confidence: 0 };
+
+  // Check for two lobes: points in top 50% of shape
+  const topThreshold = box.minY + box.h * 0.50;
+  const topPoints = points.filter((p) => p.y < topThreshold);
+  const leftTop = topPoints.filter((p) => p.x < centerX);
+  const rightTop = topPoints.filter((p) => p.x >= centerX);
+
+  if (leftTop.length < 3 || rightTop.length < 3)
+    return { match: false, confidence: 0 };
+
+  // Find peaks of each lobe
+  const leftPeak = leftTop.reduce((a, b) => (a.y < b.y ? a : b));
+  const rightPeak = rightTop.reduce((a, b) => (a.y < b.y ? a : b));
+
+  // Both peaks must be in top 45%
+  const leftPeakRatio = (leftPeak.y - box.minY) / box.h;
+  const rightPeakRatio = (rightPeak.y - box.minY) / box.h;
+  if (leftPeakRatio > 0.45 || rightPeakRatio > 0.45)
+    return { match: false, confidence: 0 };
+
+  // Check for a dip between lobes at top center
+  const topCenterPoints = topPoints.filter(
+    (p) => Math.abs(p.x - centerX) < box.w * 0.18
+  );
+
+  let dipScore = 0;
+  if (topCenterPoints.length > 0) {
+    const topCenterLowest = topCenterPoints.reduce((a, b) =>
+      a.y > b.y ? a : b
     );
+    const avgPeakY = (leftPeak.y + rightPeak.y) / 2;
+    const dipAmount = topCenterLowest.y - avgPeakY;
 
-    return {
-      type,
-      confidence,
-      vertices: 0,
-      description: `Round-ish stroke · circularity ${circ.toFixed(
-        2
-      )} · avoided polygon (${verts.length} verts)`,
-      points: [c],
-      color: "hsla(175, 80%, 50%, 1)",
-    } satisfies RecognizedShape;
+    if (dipAmount > box.h * 0.05) {
+      dipScore = clamp01(dipAmount / (box.h * 0.25));
+    }
   }
 
-  return null;
+  // Also check: the shape narrows toward the bottom (V shape)
+  const bottomQuarter = points.filter((p) => p.y > box.minY + box.h * 0.75);
+  const topQuarter = points.filter((p) => p.y < box.minY + box.h * 0.35);
+  if (bottomQuarter.length > 0 && topQuarter.length > 0) {
+    const bottomWidth =
+      Math.max(...bottomQuarter.map((p) => p.x)) -
+      Math.min(...bottomQuarter.map((p) => p.x));
+    const topWidth =
+      Math.max(...topQuarter.map((p) => p.x)) -
+      Math.min(...topQuarter.map((p) => p.x));
+    // Top should be wider than bottom (heart narrows downward)
+    const narrowRatio = topWidth > 0 ? bottomWidth / topWidth : 1;
+    if (narrowRatio < 0.75) {
+      // Good V-shape toward bottom
+      const vScore = clamp01((0.75 - narrowRatio) / 0.50);
+      const totalScore = dipScore * 0.6 + vScore * 0.4;
+      if (totalScore > 0.15) {
+        const conf = Math.round(65 + totalScore * 34);
+        return { match: true, confidence: Math.min(99, conf) };
+      }
+    }
+  }
+
+  // If dip alone is strong enough
+  if (dipScore > 0.35) {
+    const conf = Math.round(65 + dipScore * 30);
+    return { match: true, confidence: Math.min(99, conf) };
+  }
+
+  return { match: false, confidence: 0 };
 }
 
 export function recognizeFromPoints(points: Point[]): RecognizedShape | null {
@@ -612,7 +634,20 @@ export function recognizeFromPoints(points: Point[]): RecognizedShape | null {
     };
   }
 
-  // 2) Star check (concave)
+  // 2) Heart detection (after circle/oval, before star/polygon)
+  const heart = isHeart(points);
+  if (heart.match) {
+    return {
+      type: "HEART",
+      confidence: heart.confidence,
+      vertices: 0,
+      description: `Heart shape detected`,
+      points: [centroid(points)],
+      color: "hsla(350, 85%, 55%, 1)",
+    };
+  }
+
+  // 3) Star check (concave)
   const star = isStarLike(points);
   if (star.match) {
     const perim = perimeter(points);
@@ -638,7 +673,7 @@ export function recognizeFromPoints(points: Point[]): RecognizedShape | null {
     };
   }
 
-  // 3) Simplify and classify polygon
+  // 4) Simplify and classify polygon
   const perim = perimeter(points);
   const epsilon = Math.max(8, perim * 0.04);
   const simplified = rdp(points, epsilon);
@@ -650,10 +685,6 @@ export function recognizeFromPoints(points: Point[]): RecognizedShape | null {
   ) {
     verts = verts.slice(0, -1);
   }
-
-  // --- NEW: avoid HEXAGON/PENTAGON/etc on round-ish strokes ---
-  const roundish = roundishAvoidPolygon(points, verts);
-  if (roundish) return roundish;
 
   return classifyPolygon(verts);
 }
