@@ -198,36 +198,49 @@ function circleOrOval(points: Point[]): {
     ds.map((d) => Math.abs(d - avgR) / avgR).reduce((a, b) => a + b, 0) /
     ds.length;
 
-  // Hard minimum: if circularity is terrible, it's not round at all
-  if (circ < 0.45) return { type: null, confidence: 0 };
-
-  // ---------- Circle score ----------
-  const sCirc = clamp01((circ - 0.55) / (0.95 - 0.55));
-  const sARCircle = clamp01((1.40 - ar) / (1.40 - 1.0));
-  const sDev = clamp01((0.35 - avgDev) / (0.35 - 0.08));
-  const circleScore = sCirc > 0 ? sCirc * 0.50 + sARCircle * 0.25 + sDev * 0.25 : 0;
+  // ---------- Circle score (relaxed for hand-drawn) ----------
+  // circularity: accept from 0.55 (very rough) to 0.95 (smooth)
+  const sCirc = clamp01((circ - 0.50) / (0.90 - 0.50));
+  // aspect ratio: accept up to 1.45 for circle
+  const sARCircle = clamp01((1.45 - ar) / (1.45 - 1.0));
+  // radius deviation: accept up to 0.40
+  const sDev = clamp01((0.40 - avgDev) / (0.40 - 0.08));
+  // Combined — use additive blend so one weak factor doesn't kill it
+  const circleScore = sCirc * 0.45 + sARCircle * 0.30 + sDev * 0.25;
 
   // ---------- Oval score ----------
-  const sOvalCirc = clamp01((circ - 0.50) / (0.85 - 0.50));
+  const sOvalCirc = clamp01((circ - 0.45) / (0.85 - 0.45));
   const sAROval = clamp01((ar - 1.15) / (2.5 - 1.15));
-  const sOvalDev = clamp01((0.45 - avgDev) / (0.45 - 0.10));
-  const ovalScore = sOvalCirc > 0 ? sOvalCirc * 0.45 + sAROval * 0.30 + sOvalDev * 0.25 : 0;
+  const sOvalDev = clamp01((0.50 - avgDev) / (0.50 - 0.10));
+  const ovalScore = sOvalCirc * 0.4 + sAROval * 0.35 + sOvalDev * 0.25;
 
-  if (circleScore < 0.30 && ovalScore < 0.30)
+  // Minimum threshold lowered
+  if (circleScore < 0.25 && ovalScore < 0.25)
     return { type: null, confidence: 0 };
 
   if (circleScore >= ovalScore && ar < 1.5) {
+    const conf = Math.round(55 + circleScore * 44);
     return {
       type: "CIRCLE",
-      confidence: Math.min(99, Math.round(55 + circleScore * 44)),
+      confidence: Math.min(99, conf),
       extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
     };
   }
 
-  if (ovalScore >= 0.30) {
+  if (ovalScore >= 0.25) {
+    const conf = Math.round(50 + ovalScore * 49);
     return {
       type: "OVAL",
-      confidence: Math.min(99, Math.round(50 + ovalScore * 49)),
+      confidence: Math.min(99, conf),
+      extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
+    };
+  }
+
+  // Fallback: if it's round enough, call it a circle
+  if (circ > 0.55 && avgDev < 0.35 && ar < 1.6) {
+    return {
+      type: "CIRCLE",
+      confidence: Math.min(85, Math.round(50 + circ * 30)),
       extra: `circularity ${circ.toFixed(2)} · AR ${ar.toFixed(2)} · dev ${avgDev.toFixed(2)}`,
     };
   }
@@ -517,15 +530,14 @@ function isHeart(points: Point[]): { match: boolean; confidence: number } {
   const isClosed = closeDist < Math.max(40, perim * 0.15);
   if (!isClosed) return { match: false, confidence: 0 };
 
+  const c = centroid(points);
   const box = bbox(points);
   const ar = box.w / Math.max(1, box.h);
 
-  // Heart: roughly square to slightly wider or taller
-  if (ar < 0.5 || ar > 1.8) return { match: false, confidence: 0 };
-  if (box.w < 30 || box.h < 30) return { match: false, confidence: 0 };
+  // Heart aspect ratio: wider than tall or roughly square
+  if (ar < 0.7 || ar > 1.8) return { match: false, confidence: 0 };
 
-  const centerX = (box.minX + box.maxX) / 2;
-
+  // Heart signature: the bottom point is the lowest, and there are two bumps on top
   // Find the bottommost point
   let bottomIdx = 0;
   for (let i = 1; i < points.length; i++) {
@@ -533,78 +545,55 @@ function isHeart(points: Point[]): { match: boolean; confidence: number } {
   }
   const bottom = points[bottomIdx];
 
-  // Bottom tip should be roughly centered (relaxed)
+  // Bottom point should be near center-x of bounding box
+  const centerX = (box.minX + box.maxX) / 2;
   const xOffsetRatio = Math.abs(bottom.x - centerX) / box.w;
   if (xOffsetRatio > 0.25) return { match: false, confidence: 0 };
 
-  // Bottom tip should be in the lower portion
+  // Bottom point should be near the bottom of the bounding box
   const yBottomRatio = (bottom.y - box.minY) / box.h;
-  if (yBottomRatio < 0.70) return { match: false, confidence: 0 };
+  if (yBottomRatio < 0.7) return { match: false, confidence: 0 };
 
-  // Check for two lobes: points in top 50% of shape
-  const topThreshold = box.minY + box.h * 0.50;
-  const topPoints = points.filter((p) => p.y < topThreshold);
+  // Check for two "lobes" at the top: points above centroid on left and right
+  const topPoints = points.filter((p) => p.y < c.y);
   const leftTop = topPoints.filter((p) => p.x < centerX);
   const rightTop = topPoints.filter((p) => p.x >= centerX);
 
   if (leftTop.length < 3 || rightTop.length < 3)
     return { match: false, confidence: 0 };
 
-  // Find peaks of each lobe
+  // Find the highest points in each lobe
   const leftPeak = leftTop.reduce((a, b) => (a.y < b.y ? a : b));
   const rightPeak = rightTop.reduce((a, b) => (a.y < b.y ? a : b));
 
-  // Both peaks must be in top 45%
+  // Both peaks should be near the top
   const leftPeakRatio = (leftPeak.y - box.minY) / box.h;
   const rightPeakRatio = (rightPeak.y - box.minY) / box.h;
   if (leftPeakRatio > 0.45 || rightPeakRatio > 0.45)
     return { match: false, confidence: 0 };
 
-  // Check for a dip between lobes at top center
+  // There should be a dip between the lobes (top center is lower than peaks)
   const topCenterPoints = topPoints.filter(
-    (p) => Math.abs(p.x - centerX) < box.w * 0.18
+    (p) => Math.abs(p.x - centerX) < box.w * 0.15
   );
-
-  let dipScore = 0;
   if (topCenterPoints.length > 0) {
-    const topCenterLowest = topCenterPoints.reduce((a, b) =>
-      a.y > b.y ? a : b
+    const topCenterMin = topCenterPoints.reduce((a, b) =>
+      a.y < b.y ? a : b
     );
     const avgPeakY = (leftPeak.y + rightPeak.y) / 2;
-    const dipAmount = topCenterLowest.y - avgPeakY;
-
+    const dipAmount = topCenterMin.y - avgPeakY;
+    // dip should go downward (positive y)
     if (dipAmount > box.h * 0.05) {
-      dipScore = clamp01(dipAmount / (box.h * 0.25));
+      const dipScore = clamp01(dipAmount / (box.h * 0.3));
+      const conf = Math.round(65 + dipScore * 34);
+      return { match: true, confidence: Math.min(99, conf) };
     }
   }
 
-  // Also check: the shape narrows toward the bottom (V shape)
-  const bottomQuarter = points.filter((p) => p.y > box.minY + box.h * 0.75);
-  const topQuarter = points.filter((p) => p.y < box.minY + box.h * 0.35);
-  if (bottomQuarter.length > 0 && topQuarter.length > 0) {
-    const bottomWidth =
-      Math.max(...bottomQuarter.map((p) => p.x)) -
-      Math.min(...bottomQuarter.map((p) => p.x));
-    const topWidth =
-      Math.max(...topQuarter.map((p) => p.x)) -
-      Math.min(...topQuarter.map((p) => p.x));
-    // Top should be wider than bottom (heart narrows downward)
-    const narrowRatio = topWidth > 0 ? bottomWidth / topWidth : 1;
-    if (narrowRatio < 0.75) {
-      // Good V-shape toward bottom
-      const vScore = clamp01((0.75 - narrowRatio) / 0.50);
-      const totalScore = dipScore * 0.6 + vScore * 0.4;
-      if (totalScore > 0.15) {
-        const conf = Math.round(65 + totalScore * 34);
-        return { match: true, confidence: Math.min(99, conf) };
-      }
-    }
-  }
-
-  // If dip alone is strong enough
-  if (dipScore > 0.35) {
-    const conf = Math.round(65 + dipScore * 30);
-    return { match: true, confidence: Math.min(99, conf) };
+  // Fallback: if peaks are well separated and shape is closed, still possible
+  const peakSeparation = Math.abs(leftPeak.x - rightPeak.x) / box.w;
+  if (peakSeparation > 0.3) {
+    return { match: true, confidence: 65 };
   }
 
   return { match: false, confidence: 0 };
@@ -616,7 +605,20 @@ export function recognizeFromPoints(points: Point[]): RecognizedShape | null {
   // If user is in "points mode" and gives just a few points
   if (points.length <= 6) return classifyPolygon(points);
 
-  // 1) Circle / Oval first
+  // 0) Heart detection (before circle, since hearts can be round-ish)
+  const heart = isHeart(points);
+  if (heart.match) {
+    return {
+      type: "HEART",
+      confidence: heart.confidence,
+      vertices: 0,
+      description: `Heart shape detected`,
+      points: [centroid(points)],
+      color: "hsla(350, 85%, 55%, 1)",
+    };
+  }
+
+  // 1) Circle / Oval first (because circle drawings may produce many points)
   const co = circleOrOval(points);
   if (co.type) {
     const c = centroid(points);
@@ -634,20 +636,7 @@ export function recognizeFromPoints(points: Point[]): RecognizedShape | null {
     };
   }
 
-  // 2) Heart detection (after circle/oval, before star/polygon)
-  const heart = isHeart(points);
-  if (heart.match) {
-    return {
-      type: "HEART",
-      confidence: heart.confidence,
-      vertices: 0,
-      description: `Heart shape detected`,
-      points: [centroid(points)],
-      color: "hsla(350, 85%, 55%, 1)",
-    };
-  }
-
-  // 3) Star check (concave)
+  // 2) Star check (concave)
   const star = isStarLike(points);
   if (star.match) {
     const perim = perimeter(points);
@@ -673,11 +662,12 @@ export function recognizeFromPoints(points: Point[]): RecognizedShape | null {
     };
   }
 
-  // 4) Simplify and classify polygon
+  // 3) Simplify and classify polygon
   const perim = perimeter(points);
   const epsilon = Math.max(8, perim * 0.04);
   const simplified = rdp(points, epsilon);
 
+  // Remove last point if it's close to first (closed shape)
   let verts = simplified;
   if (
     verts.length > 2 &&
