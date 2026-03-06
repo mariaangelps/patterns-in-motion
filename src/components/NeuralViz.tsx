@@ -108,10 +108,10 @@ function getActivationsFromResult(result: RecognizedShape | null, inputPoints: P
   };
 
   const classAct = CLASS_NODES.map((_, i) => {
-    if (!hasResult) return hasInput ? 0.12 + Math.random() * 0.12 : 0;
+    if (!hasResult) return hasInput ? 0.12 + pseudoRand(i * 7.3) * 0.12 : 0;
     const winIdx = typeMap[result.type] ?? -1;
     if (i === winIdx) return result.confidence / 100;
-    return 0.05 + Math.random() * 0.12;
+    return 0.05 + pseudoRand(i * 7.3) * 0.12;
   });
 
   const outputAct = hasResult ? [result.confidence / 100] : hasInput ? [0.15] : [0];
@@ -550,7 +550,7 @@ export default function NeuralViz({ inputPoints, result, isProcessing }: NeuralV
         const node = nodes[i];
         if (node.appear <= 0.001) continue;
 
-        const pulse = Math.sin(t * 2.2 + node.x * 0.01) * 0.12;
+        const pulse = settled ? 0 : Math.sin(t * 2.2 + node.x * 0.01) * 0.12;
         const r = 3.2 + node.value * 7.2;
         const alpha = clamp01((0.08 + node.value * 0.92) * node.appear);
 
