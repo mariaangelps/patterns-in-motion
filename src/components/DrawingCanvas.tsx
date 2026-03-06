@@ -346,8 +346,6 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
             {mode === "draw" ? "draw a shape" : "click to place vertices"}
           </div>
 
-          {/* Scanline */}
-          <div className="absolute inset-0 scanline opacity-10 pointer-events-none" />
         </div>
 
         {/* Neural panel */}
