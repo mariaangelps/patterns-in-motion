@@ -334,7 +334,7 @@ export default function NeuralViz({ inputPoints, result, isProcessing }: NeuralV
         }
 
         const alpha = clamp01(baseAlpha + commitBoost * 0.35) * wireReveal;
-        const width = (conn.active ? 0.7 + conn.weight * 1.2 : 0.5) * (0.8 + commitBoost * 0.8);
+        const width = (conn.active ? 1.4 + conn.weight * 2.0 : 0.8) * (0.8 + commitBoost * 0.8);
 
         ctx.strokeStyle = conn.active
           ? `hsla(175, 60%, 50%, ${alpha})`
