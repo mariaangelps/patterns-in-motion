@@ -102,7 +102,7 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
       // Placed points
       if (placedPoints.length > 0) {
         if (placedPoints.length > 1) {
-          ctx.strokeStyle = "hsla(175, 80%, 50%, 0.5)"; ctx.lineWidth = 2;
+          ctx.strokeStyle = "hsla(175, 80%, 50%, 0.7)"; ctx.lineWidth = 3;
           ctx.shadowColor = "hsla(175, 80%, 50%, 0.3)"; ctx.shadowBlur = 6;
           ctx.beginPath();
           ctx.moveTo(placedPoints[0].x, placedPoints[0].y);
@@ -111,14 +111,11 @@ export default function DrawingCanvas({ onShapeRecognized }: Props) {
         }
         for (let i = 0; i < placedPoints.length; i++) {
           const p = placedPoints[i];
-          ctx.strokeStyle = "hsla(175, 80%, 50%, 0.4)"; ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.stroke();
           ctx.fillStyle = "hsla(175, 80%, 50%, 0.9)";
-          ctx.shadowColor = "hsla(175, 80%, 50%, 0.6)"; ctx.shadowBlur = 10;
-          ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+          ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
           ctx.fillStyle = "hsla(175, 80%, 50%, 0.6)";
           ctx.font = "10px 'JetBrains Mono', monospace"; ctx.textAlign = "center";
-          ctx.fillText(`P${i + 1}`, p.x, p.y - 18);
+          ctx.fillText(`P${i + 1}`, p.x, p.y - 12);
         }
       }
 
