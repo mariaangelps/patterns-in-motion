@@ -382,36 +382,7 @@ export default function NeuralViz({ inputPoints, result, isProcessing }: NeuralV
         }
       }
 
-      // Pulses — only while animating, stop once settled
-      if (pFlow > 0.02 && !settled) {
-        const pulses = PULSE_COUNT;
-        for (let k = 0; k < pulses; k++) {
-          const phase = (t * (0.55 + 0.08 * k) + k * 0.37) % 1;
-          const front = signalFront * 0.92;
-          const edgeF = clamp01((front / (layerSizes.length - 1)) + (phase - 0.5) * 0.18);
-          const edge = edgeF * (layerSizes.length - 2);
-          const edgeIdx = Math.floor(edge);
-          const local = edge - edgeIdx;
-
-          const candidates = connections.filter(
-            (c) => c.fromLayer === edgeIdx && c.active && nodes[c.from].appear > 0.6 && nodes[c.to].appear > 0.6
-          );
-          if (candidates.length === 0) continue;
-
-          const pick = candidates[Math.floor(pseudoRand(k * 31.7 + edgeIdx * 91.1) * candidates.length)];
-          const fromN = nodes[pick.from];
-          const toN = nodes[pick.to];
-
-          const px = lerp(fromN.x, toN.x, local);
-          const py = lerp(fromN.y, toN.y, local);
-
-          const alpha = (0.15 + pick.weight * 0.55) * easeInOut(pFlow);
-          ctx.fillStyle = `hsla(175, 80%, 60%, ${alpha})`;
-          ctx.beginPath();
-          ctx.arc(px, py, 1.2 + pick.weight * 1.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
+      // (Removed traveling pulse dots)
 
       // Draw nodes
       for (let i = 0; i < nodes.length; i++) {
